@@ -1,0 +1,27 @@
+# Секреты и окружение
+.env
+.venv/
+venv/
+env/
+
+# Базы данных и данные пользователей
+data/
+*.db
+*.db-wal
+*.db-shm
+*.migrated
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Редакторы и ОС
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Логи
+*.log
