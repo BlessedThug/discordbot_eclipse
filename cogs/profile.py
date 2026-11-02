@@ -208,12 +208,10 @@ class ProfileCog(commands.Cog):
         honors_count = len(profile.get("honors", []))
         place = self._get_place_in_top(gid, target.id)
 
-        if "Админ" in status:
-            color = discord.Color.gold()
-        elif "VIP" in status:
+        if "Разработчик" in status:
             color = discord.Color.purple()
-        elif "Модератор" in status:
-            color = discord.Color.blue()
+        elif "VIP" in status:
+            color = discord.Color.gold()
         else:
             color = discord.Color.teal()
 
