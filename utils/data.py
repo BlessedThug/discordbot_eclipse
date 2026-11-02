@@ -4,7 +4,7 @@ import sqlite3
 import time
 from typing import Optional
 
-DATA_DIR = "data"
+DATA_DIR = os.getenv("JAVER_STORAGE", "data")
 DB_FILE = os.path.join(DATA_DIR, "bot.db")
 GUILDS_DIR = os.path.join(DATA_DIR, "guilds")  # legacy, только для миграции
 
