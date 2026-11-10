@@ -3,6 +3,7 @@ from discord.ext import commands
 from discord import app_commands
 import random
 import time
+import re
 from typing import Dict, List, Tuple, Optional
 
 from utils import data as db
@@ -81,18 +82,9 @@ DAILY_ITEMS = {
 
 CASE_ITEMS = {
     "Денежный": {
-        "Обычная": [
-            ("💸Деньги +500 ₽", ("money", 500)),
-            ("💸Деньги +1000 ₽", ("money", 1000)),
-        ],
-        "Редкая": [
-            ("💸Деньги +2500 ₽", ("money", 2500)),
-            ("💸Деньги +6700 ₽", ("money", 6700)),
-        ],
-        "Эпическая": [
-            ("💸Деньги +15 000 ₽", ("money", 15000)),
-            ("💸Деньги +25 000 ₽", ("money", 25000)),
-        ],
+        "Обычная": [("💸Деньги +500 ₽", ("money", 500)), ("💸Деньги +1000 ₽", ("money", 1000))],
+        "Редкая": [("💸Деньги +2500 ₽", ("money", 2500)), ("💸Деньги +6700 ₽", ("money", 6700))],
+        "Эпическая": [("💸Деньги +15 000 ₽", ("money", 15000)), ("💸Деньги +25 000 ₽", ("money", 25000))],
         "Тайная": [("💸Деньги +50 000 ₽", ("money", 50000))],
         "Легендарная": [("💸Деньги +100 000 ₽", ("money", 100000))],
     },
@@ -104,25 +96,13 @@ CASE_ITEMS = {
         "Редкая": [("💸Деньги +20 000 ₽", ("money", 20000))],
         "Эпическая": [("💸Деньги +50 000 ₽", ("money", 50000))],
         "Тайная": [("💸Деньги +150 000 ₽", ("money", 150000))],
-        "Легендарная": [("💸Деньги +200 000 ₽", ("money", 500000))],
+        "Легендарная": [("💸Деньги +500 000 ₽", ("money", 500000))],
     },
     "Прайм": {
-        "Редкая": [
-            ("📘Уровень +25", ("level", 25)),
-            ("💸Деньги +30 000 ₽", ("money", 30000)),
-        ],
-        "Эпическая": [
-            ("📘Уровень +30", ("level", 30)),
-            ("💸Деньги +55 000 ₽", ("money", 55000)),
-        ],
-        "Тайная": [
-            ("💸Деньги +75 000 ₽", ("money", 75000)),
-            ("💸Деньги +80 000 ₽", ("money", 80000)),
-        ],
-        "Легендарная": [
-            ("💸Деньги +100 000 ₽", ("money", 100000)),
-            ("💸Деньги +250 000 ₽", ("money", 250000)),
-        ],
+        "Редкая": [("📘Уровень +25", ("level", 25)), ("💸Деньги +30 000 ₽", ("money", 30000))],
+        "Эпическая": [("📘Уровень +30", ("level", 30)), ("💸Деньги +55 000 ₽", ("money", 55000))],
+        "Тайная": [("💸Деньги +75 000 ₽", ("money", 75000)), ("💸Деньги +80 000 ₽", ("money", 80000))],
+        "Легендарная": [("💸Деньги +100 000 ₽", ("money", 100000)), ("💸Деньги +250 000 ₽", ("money", 250000))],
     },
 }
 
@@ -140,9 +120,7 @@ class CasesCog(commands.Cog):
 
     async def _check_guild(self, interaction: discord.Interaction) -> Optional[int]:
         if interaction.guild is None:
-            await interaction.response.send_message(
-                "❌ Команда доступна только на сервере.", ephemeral=True
-            )
+            await interaction.response.send_message("❌ Только на сервере.", ephemeral=True)
             return None
         return interaction.guild.id
 
@@ -160,7 +138,8 @@ class CasesCog(commands.Cog):
         return item_name, effect, rarity
 
     async def _apply_effect(self, profile: dict, effect, guild, member,
-                            multiplier: float = 1.0, skip_negative: bool = False) -> str:
+                            multiplier: float = 1.0, skip_negative: bool = False,
+                            allow_legendary: bool = False) -> str:
         etype, value = effect
 
         if skip_negative and isinstance(value, (int, float)) and value < 0:
@@ -169,23 +148,21 @@ class CasesCog(commands.Cog):
         if etype == "money":
             applied = int(value * multiplier) if value > 0 else value
             profile["balance"] = profile.get("balance", 0) + applied
-            suffix = f" (x{multiplier:.2f})" if multiplier > 1 and value > 0 else ""
-            return f"{'+' if applied >= 0 else ''}{applied} ₽{suffix}"
+            return ""
 
         if etype == "level":
             delta = int(value * multiplier) if value > 0 else value
             old = profile.get("level", 0)
-            new = lv.apply_level_change(old, delta)
+            
+            if allow_legendary:
+                new = lv.apply_level_change(old, delta)
+            else:
+                new = lv.apply_level_change_no_legend(old, delta)
+
             profile["level"] = new
             if guild and member and old != new:
                 await lv.sync_rank_roles(guild, member, old, new)
-            actual = new - old
-            suffix = f" (x{multiplier:.2f})" if multiplier > 1 and value > 0 else ""
-            if value > 0 and actual < delta:
-                return f"+{actual} уровней (⚠️ потолок 999+){suffix}"
-            if value < 0 and old - new < abs(value):
-                return f"{actual} уровней (⚠️ потолок 999+){suffix}"
-            return f"{'+' if actual >= 0 else ''}{actual} уровней{suffix}"
+            return ""
 
         if etype == "vip":
             days = int(value * multiplier) if value > 0 else value
@@ -194,34 +171,49 @@ class CasesCog(commands.Cog):
             statuses = [s for s in profile.get("statuses", []) if s["name"] != "VIP"]
             statuses.append({"name": "VIP", "priority": 10, "expiry": expiry})
             profile["statuses"] = statuses
-            suffix = f" (x{multiplier:.2f})" if multiplier > 1 and value > 0 else ""
-            return f"VIP на {days} дней{suffix}"
+            return f"👑 VIP на {days} дней"
 
         if etype == "item":
             inventory = profile.setdefault("inventory", [])
             inventory.append(value)
-            return "📦 Добавлено в инвентарь"
+            return ""
 
         if etype == "nothing":
             return "ничего не произошло"
         return ""
 
-    def _format_single(self, case_name: str, item_name: str, rarity: str,
-                       effect_desc: str, footer_note: str = "") -> discord.Embed:
+    def _modify_item_name(self, item_name: str, multiplier: float, old_level: int, new_level: int) -> str:
+        """Динамически меняет число в названии предмета в зависимости от множителя."""
+        if "Уровень" in item_name:
+            if old_level >= 999 and new_level == old_level + 1:
+                return "📘Уровень +1 (Легендарный)"
+            if multiplier > 1.0:
+                match = re.search(r'\+(\d[\d\s]*)', item_name)
+                if match:
+                    num = int(match.group(1).replace(' ', ''))
+                    new_num = int(num * multiplier)
+                    return item_name.replace(match.group(1), str(new_num))
+            return item_name
+        else:
+            if multiplier > 1.0:
+                match = re.search(r'\+(\d[\d\s]*)', item_name)
+                if match:
+                    num = int(match.group(1).replace(' ', ''))
+                    new_num = int(num * multiplier)
+                    return item_name.replace(match.group(1), str(new_num))
+            return item_name
+
+    def _format_single(self, case_name: str, item_name: str, rarity: str, effect_desc: str, footer_note: str = "") -> discord.Embed:
         emoji, color = RARITY.get(rarity, ("", 0x808080))
         description = (
             f"Вы открываете кейс **{case_name}**, и вам выпадает:\n\n"
             f"► {item_name}\n\n⋖ {emoji} {rarity} {emoji} ⋗"
         )
-        if effect_desc and ("x" in effect_desc or "🚫" in effect_desc or "VIP" in effect_desc):
+        if effect_desc:
             description += f"\n\n{effect_desc}"
         if footer_note:
             description += f"\n\n{footer_note}"
-        embed = discord.Embed(
-            title="●▬▬▬▬ஜ۩۞۩ஜ▬▬▬▬●",
-            description=description,
-            color=color,
-        )
+        embed = discord.Embed(title="●▬▬▬▬ஜ۩۞۩ஜ▬▬▬▬●", description=description, color=color)
         embed.set_footer(text="●▬▬▬▬ஜ۩۞۩ஜ▬▬▬▬●")
         return embed
 
@@ -245,27 +237,21 @@ class CasesCog(commands.Cog):
     @app_commands.command(name="dc", description="Открыть ежедневный кейс (раз в 12 часов бесплатно)")
     async def daily_case(self, interaction: discord.Interaction):
         gid = await self._check_guild(interaction)
-        if gid is None:
-            return
+        if gid is None: return
 
         profile = db.get_profile(gid, interaction.user.id)
         if profile is None:
-            await interaction.response.send_message(
-                "❌ Вы ещё не зарегистрированы. Используйте `/reg`.", ephemeral=True
-            )
+            await interaction.response.send_message("❌ Вы ещё не зарегистрированы. Используйте `/reg`.", ephemeral=True)
             return
 
         now = int(time.time())
         remaining = DAILY_COOLDOWN - (now - profile.get("last_daily", 0))
         if remaining > 0:
             inv = profile.get("inventory", [])
-            hint = ""
-            if KEY_MAP["Ежедневный"] in inv:
-                hint = "\n💡 У вас есть ключ — используйте `/open Ежедневный`, чтобы открыть кейс сейчас."
+            hint = "\n💡 У вас есть ключ — используйте `/open Ежедневный`, чтобы открыть кейс." if KEY_MAP["Ежедневный"] in inv else ""
             await interaction.response.send_message(
-                f"⏳ Ежедневный кейс ещё не готов. Осталось ждать "
-                f"**{int(remaining // 3600)}ч {int((remaining % 3600) // 60)}мин**.{hint}",
-                ephemeral=True,
+                f"⏳ Ежедневный кейс ещё не готов. Осталось ждать **{int(remaining // 3600)}ч {int((remaining % 3600) // 60)}мин**.{hint}",
+                ephemeral=True
             )
             return
 
@@ -278,12 +264,9 @@ class CasesCog(commands.Cog):
         today_day = int(now // 86400)
         last_day = profile.get("last_daily_day", 0)
         streak = profile.get("daily_streak", 0)
-        if last_day == today_day:
-            pass
-        elif last_day == today_day - 1:
-            streak += 1
-        else:
-            streak = 1
+        if last_day == today_day: pass
+        elif last_day == today_day - 1: streak += 1
+        else: streak = 1
         profile["daily_streak"] = streak
         profile["last_daily_day"] = today_day
 
@@ -294,23 +277,25 @@ class CasesCog(commands.Cog):
         item_name, effect, rarity = self._pick_item_by_rarity(DAILY_ITEMS)
         member = interaction.guild.get_member(interaction.user.id)
         if member is None:
-            try:
-                member = await interaction.guild.fetch_member(interaction.user.id)
-            except Exception:
-                member = None
+            try: member = await interaction.guild.fetch_member(interaction.user.id)
+            except Exception: member = None
 
-        effect_desc = await self._apply_effect(
-            profile, effect, interaction.guild, member, total_mult, skip
-        )
+        old_level = profile.get("level", 0)
+        effect_desc = await self._apply_effect(profile, effect, interaction.guild, member, total_mult, skip, allow_legendary=True)
+        new_level = profile.get("level", 0)
         profile["last_daily"] = now
         db.update_profile(gid, interaction.user.id, profile)
 
+        display_name = self._modify_item_name(item_name, total_mult, old_level, new_level)
+        
+        if effect_desc == "🚫 Отрицательная награда заблокирована":
+            display_name = f"~~{display_name}~~"
+            effect_desc = "🚫 (Заблокировано)"
+        
         note_lines = [f"🔥 Стрик: **{streak}** дн. (+{streak_bonus}%)"]
-        if total_mult > 1:
-            note_lines.append(f"✨ Общий множитель: **x{total_mult:.2f}**")
         note = "\n".join(note_lines)
 
-        embed = self._format_single("Ежедневный", item_name, rarity, effect_desc, note)
+        embed = self._format_single("Ежедневный", display_name, rarity, effect_desc, note)
         await interaction.response.send_message(embed=embed)
 
     # ---------- /open ----------
@@ -323,17 +308,14 @@ class CasesCog(commands.Cog):
     ])
     async def open_case(self, interaction: discord.Interaction, case: str, count: int = 1):
         gid = await self._check_guild(interaction)
-        if gid is None:
-            return
+        if gid is None: return
         if count < 1 or count > 10:
             await interaction.response.send_message("❌ Количество: от 1 до 10.", ephemeral=True)
             return
 
         profile = db.get_profile(gid, interaction.user.id)
         if profile is None:
-            await interaction.response.send_message(
-                "❌ Вы ещё не зарегистрированы. Используйте `/reg`.", ephemeral=True
-            )
+            await interaction.response.send_message("❌ Вы не зарегистрированы. Используйте `/reg`.", ephemeral=True)
             return
 
         inventory = profile.get("inventory", [])
@@ -344,14 +326,10 @@ class CasesCog(commands.Cog):
 
         have = inventory.count(required_key)
         if have < count:
-            await interaction.response.send_message(
-                f"❌ Недостаточно ключей для **{case}**. Нужно {count}, есть {have}.",
-                ephemeral=True,
-            )
+            await interaction.response.send_message(f"❌ Недостаточно ключей. Нужно {count}, есть {have}.", ephemeral=True)
             return
 
-        for _ in range(count):
-            inventory.remove(required_key)
+        for _ in range(count): inventory.remove(required_key)
         profile["inventory"] = inventory
 
         if case == "Ежедневный":
@@ -360,34 +338,58 @@ class CasesCog(commands.Cog):
         else:
             pool = CASE_ITEMS.get(case)
             if not pool:
-                await interaction.response.send_message(
-                    "❌ Ошибка: нет предметов для этого кейса.", ephemeral=True
-                )
+                await interaction.response.send_message("❌ Ошибка: нет предметов.", ephemeral=True)
                 return
 
         member = interaction.guild.get_member(interaction.user.id)
         if member is None:
-            try:
-                member = await interaction.guild.fetch_member(interaction.user.id)
-            except Exception:
-                member = None
+            try: member = await interaction.guild.fetch_member(interaction.user.id)
+            except Exception: member = None
 
         results = []
         for _ in range(count):
             item_name, effect, rarity = self._pick_item_by_rarity(pool)
-            effect_desc = await self._apply_effect(profile, effect, interaction.guild, member)
+            effect_desc = await self._apply_effect(profile, effect, interaction.guild, member, allow_legendary=False)
             results.append((item_name, rarity, effect_desc))
 
         db.update_profile(gid, interaction.user.id, profile)
 
         if count == 1:
             item_name, rarity, effect_desc = results[0]
-            await interaction.response.send_message(
-                embed=self._format_single(case, item_name, rarity, effect_desc)
-            )
+            await interaction.response.send_message(embed=self._format_single(case, item_name, rarity, effect_desc))
         else:
             await interaction.response.send_message(embed=self._format_multi(case, results))
 
+    # ---------- /case_debug (АДМИН) ----------
+    @app_commands.command(name="case_debug", description="Симуляция открытия кейсов (только для админов)")
+    @app_commands.choices(case=[
+        app_commands.Choice(name="Ежедневный", value="Ежедневный"),
+        app_commands.Choice(name="Денежный", value="Денежный"),
+        app_commands.Choice(name="Всё или ничего", value="Всё или ничего"),
+        app_commands.Choice(name="Прайм", value="Прайм"),
+    ])
+    async def case_debug(self, interaction: discord.Interaction, case: str, count: int = 1):
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("❌ Только для администраторов.", ephemeral=True)
+            return
+        if count < 1 or count > 20:
+            await interaction.response.send_message("❌ Количество: от 1 до 20.", ephemeral=True)
+            return
+
+        pool = DAILY_ITEMS if case == "Ежедневный" else CASE_ITEMS.get(case)
+        if not pool:
+            await interaction.response.send_message("❌ Кейс не найден.", ephemeral=True)
+            return
+
+        results = []
+        for _ in range(count):
+            item_name, effect, rarity = self._pick_item_by_rarity(pool)
+            results.append((item_name, rarity, ""))
+
+        if count == 1:
+            await interaction.response.send_message(embed=self._format_single(f"{case} (отладка)", results[0][0], results[0][1], "Симуляция: награда не выдана"))
+        else:
+            await interaction.response.send_message(embed=self._format_multi(f"{case} (отладка)", results))
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(CasesCog(bot))
