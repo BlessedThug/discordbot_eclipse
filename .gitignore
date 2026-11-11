@@ -22,7 +22,10 @@ __pycache__/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Выход
 git_helper.bat
+discordbot-eclipse.zip
 
 # Логи
 *.log
