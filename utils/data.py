@@ -117,6 +117,15 @@ def _init_schema(conn: sqlite3.Connection):
             double_daily_until INTEGER NOT NULL DEFAULT 0,
             giveaway TEXT
         );
+
+        CREATE TABLE IF NOT EXISTS temp_voices (
+            channel_id INTEGER PRIMARY KEY,
+            guild_id INTEGER NOT NULL,
+            owner_id INTEGER NOT NULL,
+            custom_name TEXT,
+            custom_symbol TEXT,
+            max_users INTEGER DEFAULT 0
+        );
     """)
     conn.commit()
 
@@ -486,3 +495,46 @@ def _migrate_guild_folder(guild_id: int, folder: str):
                       os.path.join(folder, filename + ".migrated"))
         except Exception as e:
             print(f"⚠️ Ошибка миграции {filename} ({guild_id}): {e}")
+
+# ==================== Temp Voices ====================
+def add_temp_voice(channel_id: int, guild_id: int, owner_id: int):
+    conn = _get_conn()
+    with conn:
+        conn.execute(
+            "INSERT INTO temp_voices (channel_id, guild_id, owner_id) VALUES (?, ?, ?)",
+            (channel_id, guild_id, owner_id)
+        )
+
+def get_temp_voice(channel_id: int) -> Optional[dict]:
+    conn = _get_conn()
+    row = conn.execute("SELECT * FROM temp_voices WHERE channel_id = ?", (channel_id,)).fetchone()
+    if not row:
+        return None
+    return {
+        "channel_id": row["channel_id"],
+        "guild_id": row["guild_id"],
+        "owner_id": row["owner_id"],
+        "custom_name": row["custom_name"],
+        "custom_symbol": row["custom_symbol"],
+        "max_users": row["max_users"]
+    }
+
+def update_temp_voice(channel_id: int, custom_name: str = None, custom_symbol: str = None, max_users: int = None):
+    conn = _get_conn()
+    with conn:
+        if custom_name is not None:
+            conn.execute("UPDATE temp_voices SET custom_name = ? WHERE channel_id = ?", (custom_name, channel_id))
+        if custom_symbol is not None:
+            conn.execute("UPDATE temp_voices SET custom_symbol = ? WHERE channel_id = ?", (custom_symbol, channel_id))
+        if max_users is not None:
+            conn.execute("UPDATE temp_voices SET max_users = ? WHERE channel_id = ?", (max_users, channel_id))
+
+def delete_temp_voice(channel_id: int):
+    conn = _get_conn()
+    with conn:
+        conn.execute("DELETE FROM temp_voices WHERE channel_id = ?", (channel_id,))
+
+def get_all_temp_voices() -> list:
+    conn = _get_conn()
+    rows = conn.execute("SELECT channel_id FROM temp_voices").fetchall()
+    return [r["channel_id"] for r in rows]

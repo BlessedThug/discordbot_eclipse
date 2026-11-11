@@ -68,14 +68,13 @@ class EventsCog(commands.Cog):
     event_group = app_commands.Group(name="event", description="Управление событиями")
 
     async def cog_load(self):
-        self.bot.tree.add_command(self.event_group)
+        # discord.py САМ регистрирует event_group, так как она объявлена в классе.
+        # Ручной вызов add_command приводил к дублированию (CommandAlreadyRegistered).
         self.bot.loop.create_task(self._resume_on_start())
 
     async def cog_unload(self):
-        try:
-            self.bot.tree.remove_command(self.event_group.name)
-        except Exception:
-            pass
+        # discord.py сам удалит группу при выгрузке кога.
+        pass
 
     async def _resume_on_start(self):
         await self.bot.wait_until_ready()
