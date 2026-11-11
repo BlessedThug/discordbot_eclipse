@@ -22,6 +22,7 @@ __pycache__/
 .idea/
 .DS_Store
 Thumbs.db
+git_helper.bat
 
 # Логи
 *.log
